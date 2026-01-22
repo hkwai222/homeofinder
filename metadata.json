@@ -1,0 +1,7 @@
+{
+  "name": "專業順勢療法 AI 助手",
+  "description": "結合 AI 臨床分析，提供個人化順勢療法療劑建議。包含個人體質搜尋與急救療劑小幫手兩大核心功能。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
