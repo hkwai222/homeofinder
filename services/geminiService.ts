@@ -6,16 +6,18 @@ import { UserData, AppMode } from "../types";
  * 啟動智能流式分析 - 使用 generateContentStream
  */
 export const startAnalysisStream = async (mode: AppMode, data: UserData, photoBase64?: string) => {
-  // Accessing the key inside the function to ensure we get the latest injected value
+  // Accessing the key inside the function to ensure we get the latest injected value.
+  // We check for both null/empty and the string "undefined" which can occur in some environments.
   const apiKey = process.env.API_KEY;
   
-  if (!apiKey) {
+  if (!apiKey || apiKey === 'undefined' || apiKey === '') {
     throw new Error("API_KEY_NOT_FOUND");
   }
 
+  // Always create a fresh instance right before the call to ensure the latest key is used.
   const ai = new GoogleGenAI({ apiKey });
   
-  // Use gemini-3-pro-preview for complex clinical reasoning as per guidelines.
+  // Use 'gemini-3-pro-preview' for high-quality reasoning tasks.
   const modelName = 'gemini-3-pro-preview';
 
   const systemInstruction = `
@@ -45,12 +47,16 @@ export const startAnalysisStream = async (mode: AppMode, data: UserData, photoBa
     使用者臨床資料：${JSON.stringify(data)}
   `;
 
-  const contents: any = { parts: [{ text: promptText }] };
+  // Standardize contents as an array of Content objects.
+  const contents: any[] = [{
+    role: 'user',
+    parts: [{ text: promptText }]
+  }];
 
   if (photoBase64 && photoBase64.includes(',')) {
     const base64Data = photoBase64.split(',')[1];
     const mimeType = photoBase64.split(';')[0].split(':')[1];
-    contents.parts.push({
+    contents[0].parts.push({
       inlineData: {
         data: base64Data,
         mimeType: mimeType
@@ -64,8 +70,9 @@ export const startAnalysisStream = async (mode: AppMode, data: UserData, photoBa
       contents,
       config: {
         systemInstruction: systemInstruction,
-        // Adding thinking budget for complex clinical analysis
-        thinkingConfig: { thinkingBudget: 16000 },
+        // When setting thinkingBudget, maxOutputTokens must be larger than the budget to leave room for the final answer.
+        maxOutputTokens: 20000, 
+        thinkingConfig: { thinkingBudget: 10000 },
         temperature: 1,
       },
     });

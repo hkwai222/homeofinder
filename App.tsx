@@ -104,13 +104,13 @@ const App: React.FC = () => {
     if (window.aistudio) {
       try {
         await window.aistudio.openSelectKey();
-        // 按照規範，調用後應直接假設授權成功並繼續
+        // 按照規範，調用後應直接假設授權成功並繼續，不等待 race condition
         setHasApiKey(true);
       } catch (e) {
         console.error("Failed to open key picker", e);
       }
     } else {
-      alert(language === 'ZH' ? "當前環境不支援金鑰選擇器，請檢查系統設置。" : "Key picker not supported in this environment.");
+      alert(language === 'ZH' ? "當前環境不支援金鑰選擇器。" : "Key picker not supported.");
     }
   };
 
@@ -167,15 +167,17 @@ const App: React.FC = () => {
           errorStr.includes("API key") || 
           errorStr.includes("apiKey") ||
           errorStr.includes("set when running in a browser") ||
-          errorStr.includes("Requested entity was not found")) {
+          errorStr.includes("Requested entity was not found") ||
+          errorStr.includes("403") ||
+          errorStr.includes("401")) {
         
         setHasApiKey(false);
         const keyMsg = language === 'ZH'
-          ? "API 金鑰授權無效或已過期，請點擊頁面頂部的「立即授權」按鈕重新選取金鑰。"
-          : "API Key authorization failed or expired. Please click 'Authorize Now' at the top to re-select your key.";
+          ? "API 金鑰授權無效或已過期，請點擊頁面頂部的「立即授權」重新選取金鑰。請確保選擇一個已開啟計費功能 (Paid) 的項目。"
+          : "API Key authorization failed or expired. Please click 'Authorize Now' to select a valid key from a paid project.";
         alert(keyMsg);
       } else {
-        alert(language === 'ZH' ? `分析發生錯誤：${error.message || '連線逾時'}` : `Analysis error: ${error.message || 'Connection timeout'}`);
+        alert(language === 'ZH' ? `分析失敗：${error.message || '連線不穩定'}` : `Analysis failed: ${error.message || 'Connection error'}`);
       }
       setMode(AppMode.HOME);
     }
@@ -196,9 +198,9 @@ const App: React.FC = () => {
               </div>
               <div>
                 <h4 className="font-black text-xl text-orange-900">{language === 'ZH' ? '需要 API 金鑰授權' : 'API Key Authorization Required'}</h4>
-                <p className="text-orange-700 font-medium leading-relaxed">{language === 'ZH' ? '為了使用進階的 AI 臨床分析，系統需要您授權一個付費項目的 API 金鑰。' : 'To enable advanced AI clinical analysis, please authorize an API key from a paid project.'}</p>
+                <p className="text-orange-700 font-medium leading-relaxed">{language === 'ZH' ? '為了使用進階的 AI 臨床分析，系統需要您授權一個已啟用的 API 金鑰。' : 'Advanced analysis requires an authorized API key.'}</p>
                 <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-xs text-orange-600 underline mt-2 inline-block font-bold hover:text-orange-800 transition-colors">
-                  {language === 'ZH' ? '查看計費說明與授權教學' : 'View billing info and auth guide'}
+                  {language === 'ZH' ? '關於計費說明與授權教學' : 'View billing info and auth guide'}
                 </a>
               </div>
             </div>
