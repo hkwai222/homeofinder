@@ -6,8 +6,14 @@ import { UserData, AppMode } from "../types";
  * 啟動智能流式分析 - 使用 generateContentStream
  */
 export const startAnalysisStream = async (mode: AppMode, data: UserData, photoBase64?: string) => {
-  // 根據指導方針，在每次 API 調用前建立實例，以獲取最新的 API Key
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  
+  // 檢查 API Key 是否有效，避免 SDK 內部拋出 "An API Key must be set when running in a browser"
+  if (!apiKey || apiKey === 'undefined' || apiKey === '') {
+    throw new Error("MISSING_API_KEY");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   const modelName = 'gemini-3-pro-preview';
 
   const systemInstruction = `

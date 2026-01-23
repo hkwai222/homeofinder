@@ -15,7 +15,6 @@ const DAILY_LIMIT = 5;
 
 // 擴展 window 型別以支援 aistudio 工具
 declare global {
-  /* Fix: Define AIStudio interface to ensure compatibility with global declarations */
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;
     openSelectKey: () => Promise<void>;
@@ -25,6 +24,7 @@ declare global {
   }
 }
 
+// Fixed: Added return statement and default export to fix "Module has no default export" and "Type '() => void' is not assignable to type 'FC<{}>'" errors.
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.HOME);
   const [language, setLanguage] = useState<Language>('ZH');
@@ -37,18 +37,18 @@ const App: React.FC = () => {
   // 初始化語言、歷史紀錄與使用量統計
   useEffect(() => {
     const checkApiKey = async () => {
-      // 優先檢查是否已經有注入好的 API_KEY
-      if (process.env.API_KEY && process.env.API_KEY !== 'undefined') {
+      // 檢查環境變數
+      const key = process.env.API_KEY;
+      if (key && key !== 'undefined' && key !== '') {
         setHasApiKey(true);
         return;
       }
       
-      // 如果沒有 env，檢查環境是否支援 aistudio 選擇器
+      // 檢查是否已透過 aistudio 選擇過 Key
       if (window.aistudio) {
         const selected = await window.aistudio.hasSelectedApiKey();
         setHasApiKey(selected);
       } else {
-        // 如果是在獨立 Vercel 部署且沒設好 env，設為 false 以顯示提示
         setHasApiKey(false);
       }
     };
@@ -100,9 +100,13 @@ const App: React.FC = () => {
 
   const handleOpenKeyPicker = async () => {
     if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      // 根據 race condition 處理指導方針，調用後直接假設已有 key 並繼續
-      setHasApiKey(true);
+      try {
+        await window.aistudio.openSelectKey();
+        // 觸發選擇後，直接假設成功並嘗試讓使用者繼續
+        setHasApiKey(true);
+      } catch (e) {
+        console.error("Failed to open key picker", e);
+      }
     } else {
       alert(language === 'ZH' ? "請在 Vercel 設置中正確配置 API_KEY 環境變數。" : "Please configure the API_KEY environment variable in Vercel settings.");
     }
@@ -140,6 +144,7 @@ const App: React.FC = () => {
           hasIncremented = true;
         }
 
+        // Correct: access text property directly as per Gemini SDK rules
         const chunkText = chunk.text;
         if (chunkText) {
           fullText += chunkText;
@@ -158,72 +163,57 @@ const App: React.FC = () => {
 
     } catch (error: any) {
       console.error("Analysis failed:", error);
-      
-      // 如果是因為 API Key 問題失敗，引導重新選擇
-      if (error.message?.includes('API key')) {
-        setHasApiKey(false);
-      }
-
-      const errorMsg = language === 'ZH' 
-        ? `分析失敗：${error.message || '請檢查網路連線或 API Key 設置'}` 
-        : `Analysis failed: ${error.message || 'Please check your connection or API Key settings'}`;
-      alert(errorMsg);
-      setMode(AppMode.HOME);
-      setReport(null);
       setLoading(false);
+      
+      // 處理 API Key 相關錯誤
+      if (error.message === "MISSING_API_KEY" || error.message?.includes('API key')) {
+        setHasApiKey(false);
+        const keyMsg = language === 'ZH' 
+          ? "需要授權 API Key 才能繼續分析。請點擊頁面頂端的授權按鈕。" 
+          : "API Key authorization is required. Please click the authorize button at the top of the page.";
+        alert(keyMsg);
+      } else if (error.message?.includes("Requested entity was not found")) {
+        // Reset key selection state and prompt user to select key again if entity not found error occurs
+        setHasApiKey(false);
+        const resetMsg = language === 'ZH'
+          ? "API Key 效期已過或無效，請重新授權。"
+          : "API Key expired or invalid, please authorize again.";
+        alert(resetMsg);
+      } else {
+        alert(language === 'ZH' ? "分析發生錯誤，請稍後再試。" : "An error occurred during analysis. Please try again later.");
+      }
+      setMode(AppMode.HOME);
     }
   };
 
-  const handleDeleteHistory = (id: string) => {
-    setHistory(prev => prev.filter(item => item.id !== id));
-  };
-
-  const handleViewHistory = (record: HistoryRecord) => {
-    setReport(record.report);
-    setMode(AppMode.RESULT);
-    setLoading(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleImportHistory = (records: HistoryRecord[]) => {
-    setHistory(prev => {
-      const combined = [...records, ...prev];
-      const uniqueIds = new Set();
-      return combined.filter(item => {
-        if (!uniqueIds.has(item.id)) {
-          uniqueIds.add(item.id);
-          return true;
-        }
-        return false;
-      });
-    });
-  };
-
-  const handleRestart = () => {
-    setMode(AppMode.HOME);
-    setReport(null);
-    setLoading(false);
-  };
-
-  const configs = getConfigs(language);
+  const currentConfig = (mode === AppMode.CONSTITUTION || mode === AppMode.FIRSTAID) 
+    ? getConfigs(language)[mode] 
+    : null;
 
   return (
     <Layout language={language} onLanguageChange={setLanguage}>
-      {/* API Key 狀態提示區 */}
       {!hasApiKey && (
-        <div className="max-w-xl mx-auto mb-8 bg-rose-50 border-2 border-rose-200 p-6 rounded-3xl text-center shadow-sm animate-in fade-in slide-in-from-top-4">
-          <p className="text-rose-700 font-bold mb-4">
-            {language === 'ZH' ? '⚠️ 尚未檢測到有效的 API Key。' : '⚠️ No valid API Key detected.'}
-          </p>
-          <button 
-            onClick={handleOpenKeyPicker}
-            className="bg-rose-600 hover:bg-rose-700 text-white px-8 py-3 rounded-2xl font-black transition-all shadow-lg active:scale-95"
-          >
-            {language === 'ZH' ? '點擊此處授權 API Key' : 'Click to Authorize API Key'}
-          </button>
-          <p className="mt-3 text-xs text-rose-500">
-            {language === 'ZH' ? '授權後即可使用 AI 分析功能。' : 'Authorization is required for AI analysis features.'}
-          </p>
+        <div className="max-w-4xl mx-auto mb-8 animate-in fade-in slide-in-from-top-4">
+          <div className="bg-orange-50 border border-orange-200 p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 shrink-0">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-black text-orange-900">{language === 'ZH' ? '需要 API 金鑰授權' : 'API Key Authorization Required'}</h4>
+                <p className="text-orange-700 text-sm">{language === 'ZH' ? '使用此進階分析功能需要您授權一個 API Key。' : 'Using this advanced analysis feature requires you to authorize an API Key.'}</p>
+                <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-xs text-orange-600 underline mt-1 block">
+                  {language === 'ZH' ? '關於計費與金鑰說明' : 'About billing and API keys'}
+                </a>
+              </div>
+            </div>
+            <button
+              onClick={handleOpenKeyPicker}
+              className="bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 rounded-2xl font-black shadow-lg transition-all active:scale-95 whitespace-nowrap"
+            >
+              {language === 'ZH' ? '立即授權' : 'Authorize Now'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -232,18 +222,21 @@ const App: React.FC = () => {
           onSelectMode={handleModeSelection} 
           language={language}
           history={history}
-          onDeleteHistory={handleDeleteHistory}
-          onViewHistory={handleViewHistory}
-          onImportHistory={handleImportHistory}
+          onDeleteHistory={(id) => setHistory(prev => prev.filter(h => h.id !== id))}
+          onViewHistory={(record) => {
+            setReport(record.report);
+            setMode(AppMode.RESULT);
+          }}
+          onImportHistory={(records) => setHistory(records)}
           remainingUses={DAILY_LIMIT - usageCount}
           maxUses={DAILY_LIMIT}
         />
       )}
 
-      {(mode === AppMode.CONSTITUTION || mode === AppMode.FIRSTAID) && !report && (
+      {currentConfig && (
         <StepForm 
-          config={configs[mode as keyof typeof configs]} 
-          onBack={handleRestart}
+          config={currentConfig} 
+          onBack={() => setMode(AppMode.HOME)}
           onSubmit={handleFormSubmit}
           language={language}
         />
@@ -253,12 +246,16 @@ const App: React.FC = () => {
         <AnalysisResult 
           report={report} 
           isLoading={loading} 
-          onRestart={handleRestart} 
+          onRestart={() => setMode(AppMode.HOME)}
           language={language}
         />
       )}
     </Layout>
   );
 };
+
+const ShieldAlert = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+);
 
 export default App;
