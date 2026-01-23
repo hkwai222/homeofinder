@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Layout from './components/Layout';
 import Home from './components/Home';
 import StepForm from './components/StepForm';
@@ -24,7 +24,6 @@ declare global {
   }
 }
 
-// Fixed: Added return statement and default export to fix "Module has no default export" and "Type '() => void' is not assignable to type 'FC<{}>'" errors.
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.HOME);
   const [language, setLanguage] = useState<Language>('ZH');
@@ -34,25 +33,28 @@ const App: React.FC = () => {
   const [usageCount, setUsageCount] = useState(0);
   const [hasApiKey, setHasApiKey] = useState(true);
 
+  // 檢查是否已有金鑰授權
+  const checkApiKeyStatus = useCallback(async () => {
+    // 檢查環境變數是否已直接可用
+    const key = process.env.API_KEY;
+    const isKeySet = !!(key && key !== 'undefined' && key !== '');
+    
+    if (isKeySet) {
+      setHasApiKey(true);
+      return true;
+    } else if (window.aistudio) {
+      const selected = await window.aistudio.hasSelectedApiKey();
+      setHasApiKey(selected);
+      return selected;
+    } else {
+      setHasApiKey(false);
+      return false;
+    }
+  }, []);
+
   // 初始化語言、歷史紀錄與使用量統計
   useEffect(() => {
-    const checkApiKey = async () => {
-      // 檢查環境變數
-      const key = process.env.API_KEY;
-      if (key && key !== 'undefined' && key !== '') {
-        setHasApiKey(true);
-        return;
-      }
-      
-      // 檢查是否已透過 aistudio 選擇過 Key
-      if (window.aistudio) {
-        const selected = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(selected);
-      } else {
-        setHasApiKey(false);
-      }
-    };
-    checkApiKey();
+    checkApiKeyStatus();
 
     const userLang = navigator.language.toLowerCase();
     if (userLang.startsWith('zh')) {
@@ -85,7 +87,7 @@ const App: React.FC = () => {
     } else {
       localStorage.setItem(USAGE_KEY, JSON.stringify({ date: today, count: 0 }));
     }
-  }, []);
+  }, [checkApiKeyStatus]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
@@ -102,25 +104,19 @@ const App: React.FC = () => {
     if (window.aistudio) {
       try {
         await window.aistudio.openSelectKey();
-        // 觸發選擇後，直接假設成功並嘗試讓使用者繼續
+        // 按照規範，調用後應直接假設授權成功並繼續
         setHasApiKey(true);
       } catch (e) {
         console.error("Failed to open key picker", e);
       }
     } else {
-      alert(language === 'ZH' ? "請在 Vercel 設置中正確配置 API_KEY 環境變數。" : "Please configure the API_KEY environment variable in Vercel settings.");
+      alert(language === 'ZH' ? "當前環境不支援金鑰選擇器，請檢查系統設置。" : "Key picker not supported in this environment.");
     }
-  };
-
-  const handleModeSelection = (selectedMode: AppMode) => {
-    setMode(selectedMode);
-    setReport(null);
   };
 
   const handleFormSubmit = async (data: UserData, photo: string | null) => {
     const t = TRANSLATIONS[language].common;
 
-    // 檢查額度
     if (usageCount >= DAILY_LIMIT) {
       alert(`${t.limitReached}\n\n${t.limitNote}`);
       return;
@@ -144,7 +140,6 @@ const App: React.FC = () => {
           hasIncremented = true;
         }
 
-        // Correct: access text property directly as per Gemini SDK rules
         const chunkText = chunk.text;
         if (chunkText) {
           fullText += chunkText;
@@ -165,22 +160,22 @@ const App: React.FC = () => {
       console.error("Analysis failed:", error);
       setLoading(false);
       
-      // 處理 API Key 相關錯誤
-      if (error.message === "MISSING_API_KEY" || error.message?.includes('API key')) {
+      const errorStr = error.toString();
+      
+      // 處理 API 金鑰失效或缺失的特定錯誤
+      if (errorStr.includes("API_KEY_NOT_FOUND") || 
+          errorStr.includes("API key") || 
+          errorStr.includes("apiKey") ||
+          errorStr.includes("set when running in a browser") ||
+          errorStr.includes("Requested entity was not found")) {
+        
         setHasApiKey(false);
-        const keyMsg = language === 'ZH' 
-          ? "需要授權 API Key 才能繼續分析。請點擊頁面頂端的授權按鈕。" 
-          : "API Key authorization is required. Please click the authorize button at the top of the page.";
+        const keyMsg = language === 'ZH'
+          ? "API 金鑰授權無效或已過期，請點擊頁面頂部的「立即授權」按鈕重新選取金鑰。"
+          : "API Key authorization failed or expired. Please click 'Authorize Now' at the top to re-select your key.";
         alert(keyMsg);
-      } else if (error.message?.includes("Requested entity was not found")) {
-        // Reset key selection state and prompt user to select key again if entity not found error occurs
-        setHasApiKey(false);
-        const resetMsg = language === 'ZH'
-          ? "API Key 效期已過或無效，請重新授權。"
-          : "API Key expired or invalid, please authorize again.";
-        alert(resetMsg);
       } else {
-        alert(language === 'ZH' ? "分析發生錯誤，請稍後再試。" : "An error occurred during analysis. Please try again later.");
+        alert(language === 'ZH' ? `分析發生錯誤：${error.message || '連線逾時'}` : `Analysis error: ${error.message || 'Connection timeout'}`);
       }
       setMode(AppMode.HOME);
     }
@@ -193,23 +188,23 @@ const App: React.FC = () => {
   return (
     <Layout language={language} onLanguageChange={setLanguage}>
       {!hasApiKey && (
-        <div className="max-w-4xl mx-auto mb-8 animate-in fade-in slide-in-from-top-4">
-          <div className="bg-orange-50 border border-orange-200 p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 shrink-0">
-                <ShieldAlert className="w-6 h-6" />
+        <div className="max-w-4xl mx-auto mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
+          <div className="bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-200 p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl shadow-orange-900/5">
+            <div className="flex items-center gap-5">
+              <div className="w-16 h-16 bg-orange-100 rounded-3xl flex items-center justify-center text-orange-600 shrink-0 shadow-inner">
+                <ShieldAlert className="w-8 h-8" />
               </div>
               <div>
-                <h4 className="font-black text-orange-900">{language === 'ZH' ? '需要 API 金鑰授權' : 'API Key Authorization Required'}</h4>
-                <p className="text-orange-700 text-sm">{language === 'ZH' ? '使用此進階分析功能需要您授權一個 API Key。' : 'Using this advanced analysis feature requires you to authorize an API Key.'}</p>
-                <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-xs text-orange-600 underline mt-1 block">
-                  {language === 'ZH' ? '關於計費與金鑰說明' : 'About billing and API keys'}
+                <h4 className="font-black text-xl text-orange-900">{language === 'ZH' ? '需要 API 金鑰授權' : 'API Key Authorization Required'}</h4>
+                <p className="text-orange-700 font-medium leading-relaxed">{language === 'ZH' ? '為了使用進階的 AI 臨床分析，系統需要您授權一個付費項目的 API 金鑰。' : 'To enable advanced AI clinical analysis, please authorize an API key from a paid project.'}</p>
+                <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-xs text-orange-600 underline mt-2 inline-block font-bold hover:text-orange-800 transition-colors">
+                  {language === 'ZH' ? '查看計費說明與授權教學' : 'View billing info and auth guide'}
                 </a>
               </div>
             </div>
             <button
               onClick={handleOpenKeyPicker}
-              className="bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 rounded-2xl font-black shadow-lg transition-all active:scale-95 whitespace-nowrap"
+              className="bg-orange-600 hover:bg-orange-500 text-white px-10 py-4 rounded-2xl font-black text-lg shadow-lg shadow-orange-600/20 transition-all active:scale-95 whitespace-nowrap"
             >
               {language === 'ZH' ? '立即授權' : 'Authorize Now'}
             </button>
@@ -219,7 +214,7 @@ const App: React.FC = () => {
 
       {mode === AppMode.HOME && (
         <Home 
-          onSelectMode={handleModeSelection} 
+          onSelectMode={(m) => setMode(m)} 
           language={language}
           history={history}
           onDeleteHistory={(id) => setHistory(prev => prev.filter(h => h.id !== id))}
@@ -255,7 +250,7 @@ const App: React.FC = () => {
 };
 
 const ShieldAlert = ({ className }: { className?: string }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
 );
 
 export default App;

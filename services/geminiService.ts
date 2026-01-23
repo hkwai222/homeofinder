@@ -6,14 +6,16 @@ import { UserData, AppMode } from "../types";
  * 啟動智能流式分析 - 使用 generateContentStream
  */
 export const startAnalysisStream = async (mode: AppMode, data: UserData, photoBase64?: string) => {
+  // Accessing the key inside the function to ensure we get the latest injected value
   const apiKey = process.env.API_KEY;
   
-  // 檢查 API Key 是否有效，避免 SDK 內部拋出 "An API Key must be set when running in a browser"
-  if (!apiKey || apiKey === 'undefined' || apiKey === '') {
-    throw new Error("MISSING_API_KEY");
+  if (!apiKey) {
+    throw new Error("API_KEY_NOT_FOUND");
   }
 
   const ai = new GoogleGenAI({ apiKey });
+  
+  // Use gemini-3-pro-preview for complex clinical reasoning as per guidelines.
   const modelName = 'gemini-3-pro-preview';
 
   const systemInstruction = `
@@ -62,7 +64,9 @@ export const startAnalysisStream = async (mode: AppMode, data: UserData, photoBa
       contents,
       config: {
         systemInstruction: systemInstruction,
-        temperature: 0.7,
+        // Adding thinking budget for complex clinical analysis
+        thinkingConfig: { thinkingBudget: 16000 },
+        temperature: 1,
       },
     });
   } catch (err: any) {
